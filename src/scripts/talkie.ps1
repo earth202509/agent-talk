@@ -73,6 +73,13 @@ function ConvertTo-SafeId {
     return 'wtcc-' + $hash.Substring(0, 16)
 }
 
+function New-SessionId {
+    param([string]$Value)
+    $prefix = ConvertTo-SafeId $Value
+    $suffix = ([guid]::NewGuid().ToString('N')).Substring(0, 8)
+    return "$prefix-$suffix"
+}
+
 function Get-Prop {
     param($Obj, [string]$Name)
     if ($null -eq $Obj) { return $null }
@@ -189,6 +196,34 @@ function Set-SessionLastSentText {
     if ($changed) { Write-Sessions $sessions }
 }
 
+function Remove-SessionArtifacts {
+    param($Session)
+    foreach ($name in @('log_path', 'meta_path')) {
+        $path = [string](Get-TransportValue $Session $name)
+        if ($path -and (Test-Path -LiteralPath $path)) {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Remove-OrphanSessionArtifacts {
+    $referenced = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($s in Read-Sessions) {
+        foreach ($name in @('log_path', 'meta_path')) {
+            $path = [string](Get-TransportValue $s $name)
+            if ($path) { [void]$referenced.Add([System.IO.Path]::GetFullPath($path)) }
+        }
+    }
+    foreach ($dir in @($LogDir, $MetaDir)) {
+        if (-not (Test-Path -LiteralPath $dir)) { continue }
+        foreach ($file in Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue) {
+            if (-not $referenced.Contains($file.FullName)) {
+                Remove-Item -LiteralPath $file.FullName -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
 function Get-LiveSessions {
     $live = @()
     $changed = $false
@@ -245,6 +280,7 @@ function Ensure-VtScreenRenderer {
     $source = @'
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 
 namespace AgentTalk
@@ -253,10 +289,17 @@ namespace AgentTalk
     {
         public static string Render(string input, int cols, int rows)
         {
+            return Render(input, cols, rows, 0);
+        }
+
+        public static string Render(string input, int cols, int rows, int scrollbackRows)
+        {
             if (cols <= 0) cols = 120;
             if (rows <= 0) rows = 40;
+            if (scrollbackRows < 0) scrollbackRows = 0;
             var screen = new char[rows, cols];
             Clear(screen, rows, cols);
+            var scrollback = new List<string>();
             int r = 0, c = 0, savedR = 0, savedC = 0;
             bool wrapPending = false;
 
@@ -295,32 +338,36 @@ namespace AgentTalk
                 }
 
                 if (ch == '\r') { c = 0; wrapPending = false; continue; }
-                if (ch == '\n') { NewLine(screen, rows, cols, ref r, ref c); wrapPending = false; continue; }
+                if (ch == '\n') { NewLine(screen, rows, cols, ref r, ref c, scrollback, scrollbackRows); wrapPending = false; continue; }
                 if (ch == '\b') { if (c > 0) c--; wrapPending = false; continue; }
                 if (Char.IsControl(ch)) { wrapPending = false; continue; }
 
                 if (wrapPending)
                 {
-                    NewLine(screen, rows, cols, ref r, ref c);
+                    NewLine(screen, rows, cols, ref r, ref c, scrollback, scrollbackRows);
                     wrapPending = false;
                 }
-                screen[r, c] = ch;
-                if (c >= cols - 1)
+                int width = CharCellWidth(ch);
+                if (width <= 0) continue;
+                if (c + width > cols)
                 {
-                    wrapPending = true;
+                    NewLine(screen, rows, cols, ref r, ref c, scrollback, scrollbackRows);
                 }
-                else
+                screen[r, c] = ch;
+                if (width == 2 && c + 1 < cols) screen[r, c + 1] = '\0';
+                c += width;
+                if (c >= cols)
                 {
-                    c++;
+                    c = cols - 1;
+                    wrapPending = true;
                 }
             }
 
             var lines = new List<string>();
+            lines.AddRange(scrollback);
             for (int y = 0; y < rows; y++)
             {
-                var chars = new char[cols];
-                for (int x = 0; x < cols; x++) chars[x] = screen[y, x];
-                lines.Add(new string(chars).TrimEnd());
+                lines.Add(BuildLine(screen, y, cols));
             }
             return string.Join("\n", lines).Trim();
         }
@@ -378,10 +425,33 @@ namespace AgentTalk
             return values.ToArray();
         }
 
-        private static void NewLine(char[,] screen, int rows, int cols, ref int r, ref int c)
+        private static int CharCellWidth(char ch)
+        {
+            var category = CharUnicodeInfo.GetUnicodeCategory(ch);
+            if (category == UnicodeCategory.NonSpacingMark || category == UnicodeCategory.EnclosingMark) return 0;
+            int code = ch;
+            if ((code >= 0x1100 && code <= 0x115F) ||
+                (code >= 0x2329 && code <= 0x232A) ||
+                (code >= 0x2E80 && code <= 0xA4CF) ||
+                (code >= 0xAC00 && code <= 0xD7A3) ||
+                (code >= 0xF900 && code <= 0xFAFF) ||
+                (code >= 0xFE10 && code <= 0xFE19) ||
+                (code >= 0xFE30 && code <= 0xFE6F) ||
+                (code >= 0xFF00 && code <= 0xFF60) ||
+                (code >= 0xFFE0 && code <= 0xFFE6)) return 2;
+            return 1;
+        }
+
+        private static void NewLine(char[,] screen, int rows, int cols, ref int r, ref int c, List<string> scrollback, int scrollbackRows)
         {
             c = 0;
             if (r < rows - 1) { r++; return; }
+            if (scrollbackRows > 0)
+            {
+                var line = BuildLine(screen, 0, cols);
+                if (line.Length > 0) scrollback.Add(line);
+                while (scrollback.Count > scrollbackRows) scrollback.RemoveAt(0);
+            }
             for (int y = 1; y < rows; y++)
                 for (int x = 0; x < cols; x++)
                     screen[y - 1, x] = screen[y, x];
@@ -393,6 +463,17 @@ namespace AgentTalk
             for (int y = 0; y < rows; y++)
                 for (int x = 0; x < cols; x++)
                     screen[y, x] = ' ';
+        }
+
+        private static string BuildLine(char[,] screen, int row, int cols)
+        {
+            var sb = new StringBuilder();
+            for (int x = 0; x < cols; x++)
+            {
+                char ch = screen[row, x];
+                if (ch != '\0') sb.Append(ch);
+            }
+            return sb.ToString().TrimEnd();
         }
 
         private static void ClearFromCursor(char[,] screen, int rows, int cols, int r, int c)
@@ -424,7 +505,7 @@ namespace AgentTalk
 }
 
 function ConvertTo-PlainText {
-    param([string]$Raw)
+    param([string]$Raw, [int]$ScrollbackRows = 0)
     if (-not $Raw) { return '' }
     $text = $Raw
     $cols = 120
@@ -435,19 +516,36 @@ function ConvertTo-PlainText {
     }
     $text = [regex]::Replace($text, '(?m)^\[conpty\].*(\r?\n)?', '')
     $text = [regex]::Replace($text, '\[pipe-in\].*(\r?\n)?', '')
+    $scrollbackRows = [Math]::Max(0, $ScrollbackRows)
     Ensure-VtScreenRenderer
-    $screen = [AgentTalk.VtScreenRenderer]::Render($text, $cols, $rows)
+    $screen = [AgentTalk.VtScreenRenderer]::Render($text, $cols, $rows, $scrollbackRows)
     return (($screen -replace "`n{3,}", "`n`n").Trim())
 }
 
+function Get-ReplyScrollbackRows {
+    $scrollbackRows = 400
+    if ($env:AGENT_TALK_SCROLLBACK_ROWS) {
+        $scrollbackRows = [Math]::Max(0, [int]$env:AGENT_TALK_SCROLLBACK_ROWS)
+    }
+    return $scrollbackRows
+}
+
+function Get-StableIdleMilliseconds {
+    $milliseconds = 3000
+    if ($env:AGENT_TALK_STABLE_IDLE_MS) {
+        $milliseconds = [Math]::Max(100, [int]$env:AGENT_TALK_STABLE_IDLE_MS)
+    }
+    return $milliseconds
+}
+
 function Read-SessionText {
-    param([string]$PipeName)
+    param([string]$PipeName, [int]$ScrollbackRows = 0)
     $s = Get-SessionByPipe $PipeName
     if (-not $s) { return $null }
     $logPath = [string](Get-TransportValue $s 'log_path')
     if (-not (Test-Path -LiteralPath $logPath)) { return '' }
     $raw = Get-Content -Encoding UTF8 -Raw -LiteralPath $logPath
-    ConvertTo-PlainText $raw
+    ConvertTo-PlainText $raw $ScrollbackRows
 }
 
 function Load-AdapterForApp {
@@ -549,11 +647,12 @@ function Get-AdapterInputMode {
 function Invoke-NewSession {
     if ($Rest.Count -lt 2) { throw 'new-session requires <app> <title> [extra-args]' }
     Ensure-StateDirs
+    Remove-OrphanSessionArtifacts
     $spec = $Rest[0]
     $title = $Rest[1]
     $extra = if ($Rest.Count -ge 3) { $Rest[2] } else { '__default__' }
     $resolved = Resolve-AppSpec -Spec $spec -ExtraArgs $extra
-    $pipe = ConvertTo-SafeId "$title|$spec|$((Get-Location).Path)"
+    $pipe = New-SessionId "$title|$spec|$((Get-Location).Path)"
 
     $logPath = Join-Path $LogDir "$pipe.log"
     $metaPath = Join-Path $MetaDir "$pipe.json"
@@ -590,11 +689,22 @@ function Invoke-NewSession {
         $newSessionReadyTimeout = [Math]::Max(1, [int]$env:AGENT_TALK_NEW_SESSION_READY_TIMEOUT_SEC)
     }
     $adapter = Load-AdapterForApp $resolved.App $resolved.DetectedAgentVersion
-    Wait-StableIdleText -PipeName $pipe -Adapter $adapter -MaxSeconds $newSessionReadyTimeout | Out-Null
-    $ready = $true
+    $state = Wait-NewSessionStatus -PipeName $pipe -Adapter $adapter -MaxSeconds $newSessionReadyTimeout
+    $ready = [bool]$state.Ready
+    $status = [string]$state.Status
+    $sessions = @(Read-Sessions)
+    foreach ($s in $sessions) {
+        if ((Get-SessionId $s) -eq $pipe) {
+            $s | Add-Member -NotePropertyName status -NotePropertyValue $status -Force
+            $s | Add-Member -NotePropertyName updated_at -NotePropertyValue ((Get-Date).ToString('o')) -Force
+            break
+        }
+    }
+    Write-Sessions $sessions
 
     "PANE=$pipe"
     "READY=$([int]$ready)"
+    "STATUS=$status"
     "APP=$($resolved.App)"
 }
 
@@ -666,6 +776,7 @@ function Wait-StableIdleText {
     )
     $stableSince = $null
     $lastText = ''
+    $stableIdleMilliseconds = Get-StableIdleMilliseconds
     $deadline = (Get-Date).AddSeconds($MaxSeconds)
     while ((Get-Date) -lt $deadline) {
         $text = Read-SessionText $PipeName
@@ -676,12 +787,51 @@ function Wait-StableIdleText {
             $stableSince = $null
             $lastText = $text
         }
-        if ($stableSince -and ((Get-Date) - $stableSince).TotalMilliseconds -ge 700 -and (Get-TextStatus $text $adapter) -eq 'ready') {
+        if ($stableSince -and ((Get-Date) - $stableSince).TotalMilliseconds -ge $stableIdleMilliseconds -and (Get-TextStatus $text $adapter) -eq 'ready') {
             return $text
         }
         Start-Sleep -Seconds $ReplyPollIntervalSeconds
     }
     exit 1
+}
+
+function Wait-NewSessionStatus {
+    param(
+        [Parameter(Mandatory = $true)][string]$PipeName,
+        [Parameter(Mandatory = $true)][hashtable]$Adapter,
+        [int]$MaxSeconds = 60
+    )
+    $stableSince = $null
+    $lastText = ''
+    $lastStatus = 'unknown'
+    $stableIdleMilliseconds = Get-StableIdleMilliseconds
+    $deadline = (Get-Date).AddSeconds($MaxSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $text = Read-SessionText $PipeName
+        if ($null -eq $text) {
+            return [pscustomobject]@{ Ready = $false; Status = 'error' }
+        }
+        if ($text -eq $lastText) {
+            if (-not $stableSince) { $stableSince = Get-Date }
+        } else {
+            $stableSince = $null
+            $lastText = $text
+        }
+        $lastStatus = Get-TextStatus $text $Adapter
+        if ($lastStatus -eq 'error') {
+            return [pscustomobject]@{ Ready = $false; Status = 'error' }
+        }
+        if ($stableSince -and ((Get-Date) - $stableSince).TotalMilliseconds -ge $stableIdleMilliseconds) {
+            if ($lastStatus -eq 'ready') {
+                return [pscustomobject]@{ Ready = $true; Status = 'ready' }
+            }
+            if ($lastStatus -eq 'unknown') {
+                return [pscustomobject]@{ Ready = $false; Status = $lastStatus }
+            }
+        }
+        Start-Sleep -Seconds $ReplyPollIntervalSeconds
+    }
+    return [pscustomobject]@{ Ready = $false; Status = $lastStatus }
 }
 
 function Invoke-Get {
@@ -699,12 +849,15 @@ function Invoke-WaitReply {
     $appName = if ($session) { [string]$session.app } else { 'pi' }
     $adapter = Load-AdapterForApp $appName ([string](Get-Prop $session 'agent_version'))
     $lastInputText = if ($session) { [string](Get-Prop $session 'last_sent_text') } else { '' }
-    $text = Wait-StableIdleText -PipeName $pipe -Adapter $adapter -MaxSeconds $max
+    Wait-StableIdleText -PipeName $pipe -Adapter $adapter -MaxSeconds $max | Out-Null
+    $text = Read-SessionText $pipe (Get-ReplyScrollbackRows)
+    if ($null -eq $text) { exit 2 }
     Get-ReplyText $text $adapter $lastInputText
     exit 0
 }
 
 function Invoke-ListSessions {
+    Remove-OrphanSessionArtifacts
     $format = if ($Rest.Count -ge 1) { $Rest[0] } else { 'table' }
     $sessions = @(Get-LiveSessions)
     if ($format -eq 'json') {
@@ -738,6 +891,8 @@ function Invoke-KillPane {
     }
     $kept = @(Read-Sessions | Where-Object { (Get-SessionId $_) -ne $pipe -and [string](Get-TransportValue $_ 'handle') -ne $pipe })
     Write-Sessions $kept
+    Remove-SessionArtifacts $session
+    Remove-OrphanSessionArtifacts
     "KILLED=$pipe"
 }
 

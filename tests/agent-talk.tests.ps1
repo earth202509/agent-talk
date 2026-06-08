@@ -56,7 +56,7 @@ function Invoke-AgentTalkFixtureWaitReply {
         Set-Content -Encoding UTF8 -LiteralPath $logPath -Value $Lines
         $fixture = New-AgentTalkFixtureState -App $App -LogPath $logPath -AgentVersion $AgentVersion -LastInputText $LastInputText
         $env:WT_CONPTY_CC_STATE_DIR = $fixture.StateDir
-        return ((& $talkie wait-reply pane-fixture 4 2>&1) -join "`n")
+        return ((& $talkie wait-reply pane-fixture 8 2>&1) -join "`n")
     } finally {
         if ($null -ne $oldStateDir) { $env:WT_CONPTY_CC_STATE_DIR = $oldStateDir } else { Remove-Item Env:\WT_CONPTY_CC_STATE_DIR -ErrorAction SilentlyContinue }
         if ($fixture -and (Test-Path -LiteralPath $fixture.Work)) { Remove-Item -LiteralPath $fixture.Work -Recurse -Force }
@@ -117,6 +117,20 @@ Test-Case 'agent-talk send stores last input for wait-reply' {
     Assert ($talkieText.Contains('Get-ReplyText $text $adapter $lastInputText')) 'wait-reply should pass last input into the adapter'
 }
 
+Test-Case 'agent-talk new-session creates unique ids' {
+    $talkieText = Get-Content -Encoding UTF8 -Raw -LiteralPath (Join-Path $RepoRoot 'src\scripts\talkie.ps1')
+    Assert ($talkieText.Contains('function New-SessionId')) 'talkie should create unique session ids'
+    Assert ($talkieText.Contains('[guid]::NewGuid()')) 'new session ids should include random entropy'
+    Assert ($talkieText.Contains('$pipe = New-SessionId')) 'new-session should not reuse deterministic pipe ids'
+    Assert ($talkieText.Contains('function Wait-NewSessionStatus')) 'new-session should wait with status reporting'
+    Assert ($talkieText.Contains('Wait-NewSessionStatus -PipeName $pipe')) 'new-session should not lose pane id on non-ready states'
+    Assert ($talkieText.Contains('"STATUS=$status"')) 'new-session should report ready/unknown/busy/error status'
+    Assert ($talkieText.Contains('function Get-StableIdleMilliseconds')) 'stable idle window should be centralized and configurable'
+    Assert ($talkieText.Contains('AGENT_TALK_STABLE_IDLE_MS')) 'stable idle window should allow environment override'
+    Assert ($talkieText.Contains('$milliseconds = 3000')) 'stable idle default should be long enough for startup repaint jitter'
+    Assert ($talkieText.Contains("if (`$lastStatus -eq 'error')")) 'new-session should return error immediately without waiting for stability'
+}
+
 Test-Case 'agent-talk codex reply uses last input and bullet anchor' {
     $promptChar = [char]0x203A
     $replyBullet = [char]0x2022
@@ -153,6 +167,33 @@ Test-Case 'agent-talk pi reply uses last input and thinking anchor' {
     Assert ($text -eq 'Hello from Pi.') ('pi should extract text after the thinking anchor: ' + $text)
 }
 
+Test-Case 'agent-talk pi reply preserves scrolled long replies' {
+    $dash = [string]([char]0x2500) * 80
+    $lines = @(
+        '[conpty] size=80x6',
+        'hello',
+        'Thinking...',
+        'draft line before final spinner',
+        'Working...',
+        'Final answer line 1.',
+        'Final answer line 2.',
+        'Final answer line 3.',
+        'Final answer line 4.',
+        'Final answer line 5.',
+        'Final answer line 6.',
+        '',
+        $dash,
+        '',
+        $dash,
+        '? for shortcuts'
+    )
+
+    $text = Invoke-AgentTalkFixtureWaitReply -App 'pi' -Lines $lines -AgentVersion '0.78.0' -LastInputText 'hello'
+    Assert ($text -notmatch 'draft line before final spinner') ('pi should use the last busy anchor after input: ' + $text)
+    Assert ($text -match 'Final answer line 1\.') ('pi should keep the start of the final scrolled reply: ' + $text)
+    Assert ($text -match 'Final answer line 6\.') ('pi should keep the end of the final scrolled reply: ' + $text)
+}
+
 Test-Case 'agent-talk pi submits with a separate enter key' {
     . (Join-Path $RepoRoot 'src\scripts\agents\shared.ps1')
     $adapter = & (Join-Path $RepoRoot 'src\scripts\agents\pi.ps1') -ExtraArgs ''
@@ -160,6 +201,22 @@ Test-Case 'agent-talk pi submits with a separate enter key' {
     Assert ($adapter.AppendMessageNewline -eq $false) 'pi should not append newline to the message text'
     Assert ($adapter.SubmitSequenceSeparate -eq $true) 'pi should submit with a separate Enter sequence'
     Assert ([int][char]$adapter.SubmitSequence -eq 13) 'pi submit sequence should be carriage return only'
+}
+
+Test-Case 'agent-talk cleans session artifacts on lifecycle commands' {
+    $talkieText = Get-Content -Encoding UTF8 -Raw -LiteralPath (Join-Path $RepoRoot 'src\scripts\talkie.ps1')
+
+    Assert ($talkieText.Contains('function Remove-SessionArtifacts')) 'talkie should define per-session artifact cleanup'
+    Assert ($talkieText.Contains('function Remove-OrphanSessionArtifacts')) 'talkie should define orphan artifact cleanup'
+    Assert ($talkieText.Contains('Remove-SessionArtifacts $session')) 'kill-session should remove the killed session log/meta'
+    Assert ($talkieText.Contains('function Invoke-NewSession') -and $talkieText.Contains('Remove-OrphanSessionArtifacts')) 'new-session/list-sessions should clean orphan artifacts'
+}
+
+Test-Case 'agent-talk conpty log uses streaming UTF-8 decoder' {
+    $shimText = Get-Content -Encoding UTF8 -Raw -LiteralPath (Join-Path $RepoRoot 'src\scripts\terminals\wt-conpty-shim.ps1')
+
+    Assert ($shimText.Contains('utf8.GetDecoder()')) 'ConPTY output logging should decode UTF-8 across read boundaries'
+    Assert ($shimText.Contains('decoder.GetChars(buffer, 0, n, chars, 0, false)')) 'ConPTY output logging should not call GetString on partial byte chunks'
 }
 
 Test-Case 'agent-talk agy reply starts after latest user input and prefers bullet replies' {
@@ -213,6 +270,41 @@ Test-Case 'agent-talk agy reply handles prompt on its own input line' {
     Assert ($text -eq $expected) ('agy should scope replies after a split input prompt: ' + $text)
 }
 
+Test-Case 'agent-talk agy reply skips visible multiline input echo' {
+    $dash = [string]([char]0x2500) * 80
+    $lines = @(
+        '[conpty] size=120x30',
+        '> Please write a long reply using this format:',
+        'First line must be START-MULTILINE-ECHO.',
+        'Then write items 1 to 3.',
+        'Last line must be END-MULTILINE-ECHO.',
+        'Do not run commands or edit files.',
+        '',
+        'START-MULTILINE-ECHO',
+        '1. First reply item.',
+        '2. Second reply item.',
+        '3. Third reply item.',
+        'END-MULTILINE-ECHO',
+        '',
+        $dash,
+        '>',
+        $dash,
+        '? for shortcuts                  Gemini 3.5 Flash (High)'
+    )
+    $lastInput = @'
+Please write a long reply using this format:
+First line must be START-MULTILINE-ECHO.
+Then write items 1 to 3.
+Last line must be END-MULTILINE-ECHO.
+Do not run commands or edit files.
+'@.Trim()
+
+    $text = Invoke-AgentTalkFixtureWaitReply -App 'agy' -Lines $lines -AgentVersion '1.0.6' -LastInputText $lastInput
+    Assert ($text.StartsWith('START-MULTILINE-ECHO')) ('agy should skip all visible input echo lines: ' + $text)
+    Assert ($text -notmatch 'First line must be START-MULTILINE-ECHO') ('agy should not include multiline input echo: ' + $text)
+    Assert ($text -match 'END-MULTILINE-ECHO') ('agy should keep the complete reply: ' + $text)
+}
+
 Test-Case 'agent-talk agy reply keeps plain text when no bullet reply exists' {
     $dash = [string]([char]0x2500) * 80
     $lines = @(
@@ -261,6 +353,7 @@ Test-Case 'agent-talk agy adapter skips permission prompts by default' {
         $agy = & (Join-Path $adapterDir 'antigravity.ps1') -ExtraArgs ''
         Assert ($agy.AppendMessageNewline -eq $false) 'agy should not append newline to the message text'
         Assert ($agy.SubmitSequenceSeparate -eq $true) 'agy should submit with a separate Enter sequence'
+        Assert ([int][char]$agy.SubmitSequence -eq 13) 'agy submit sequence should be carriage return only'
         Assert ($agy.Args -match '\s-EncodedCommand\s') 'agy adapter should launch via encoded command'
         $encoded = [regex]::Match($agy.Args, '-EncodedCommand\s+(\S+)').Groups[1].Value
         $decoded = [System.Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($encoded))

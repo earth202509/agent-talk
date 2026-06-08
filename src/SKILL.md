@@ -26,11 +26,11 @@ Session state is stored in `state/wt-conpty/sessions.json` with `session_id`,
 
 1. Decide what stays local: goal ownership, integration, verification, and
    final user communication stay with the main brain.
-2. Read `references/routing-policy.md` to choose the right app.
+2. Choose the worker app that fits the current task.
 3. Open a worker — talkie waits until the session is ready before returning:
    ```powershell
-   & $TALKIE new-session pi "PI#1 scan-state"
-   # → PANE=wtcc-xxxx  APP=pi  READY=1
+   & $TALKIE new-session <app> "<title>"
+   # → PANE=wtcc-xxxx  APP=<app>  READY=1
    ```
 4. Send the task (base64-encode to avoid quoting issues):
    ```powershell
@@ -50,7 +50,7 @@ Session state is stored in `state/wt-conpty/sessions.json` with `session_id`,
 $TALKIE = "<agent-talk-skill-dir>\scripts\talkie.ps1"
 
 # Open a new worker session (blocks until ready).
-& $TALKIE new-session pi "PI#1 scan-state"
+& $TALKIE new-session <app> "<title>"
 
 # Send a task.
 & $TALKIE send $pane "@base64:$encodedTask"
@@ -95,14 +95,8 @@ Supported app names: `pi`, `claude`, `codex`, `agy`/`antigravity`.
 by reading the screen and picking the appropriate response, the same way it would in any
 interactive CLI.
 
-## Routing Policy
-
-The main brain reads `references/routing-policy.md`, decides whether to
-delegate, and chooses an app. Update that file when the user asks to remember
-a routing preference.
-
 ## Review Standard
 
-Worker output is a draft. For code changes, inspect the real diff, run
-relevant tests, and use `references/acceptance-checklists.md` when the task
-is risky or broad. For UI work, also use `references/ui-delegation-guide.md`.
+Worker output is a draft. For code changes, inspect the real diff, run relevant
+tests, and keep goal ownership, integration, verification, and final user
+communication in the main session.

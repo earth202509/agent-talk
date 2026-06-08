@@ -13,7 +13,7 @@
     File     = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
     Args     = New-AgentTalkPowerShellArgs -CommandName 'agy' -BaseArgs @('--dangerously-skip-permissions') -ExtraArgs $ExtraArgs
     AppendMessageNewline = $false
-    SubmitSequence = "`r`n"
+    SubmitSequence = "`r"
     SubmitSequenceSeparate = $true
     UsesFullScreenTui = { $true }
 

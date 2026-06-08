@@ -154,6 +154,17 @@ function Get-AgentTalkFirstContentLine {
     return ''
 }
 
+function Get-AgentTalkContentLines {
+    param([string]$Text)
+    $result = @()
+    if (-not $Text) { return $result }
+    foreach ($line in ($Text -split "(`r`n|`n|`r)")) {
+        $t = $line.Trim()
+        if ($t) { $result += $t }
+    }
+    return $result
+}
+
 function Test-AgentTalkInputMatch {
     param([string]$ScreenInput, [string]$LastInput, [bool]$AllowPartial = $true)
     $left = Normalize-AgentTalkReplyText $ScreenInput
@@ -171,17 +182,68 @@ function Test-AgentTalkInputMatch {
     return ($left.StartsWith($right, [System.StringComparison]::OrdinalIgnoreCase) -or $right.StartsWith($left, [System.StringComparison]::OrdinalIgnoreCase))
 }
 
+function Find-AgentTalkFollowingInputEnd {
+    param(
+        [string[]]$Lines,
+        [int]$StartIndex,
+        [string]$MatchedInputLine,
+        [string]$LastInputText
+    )
+    $expectedLines = @(Get-AgentTalkContentLines $LastInputText)
+    if (-not $Lines -or $StartIndex -lt 0 -or $expectedLines.Count -le 1) { return $StartIndex }
+
+    $matchedExpectedIndex = -1
+    for ($e = 0; $e -lt $expectedLines.Count; $e++) {
+        if (Test-AgentTalkInputMatch -ScreenInput $MatchedInputLine -LastInput $expectedLines[$e] -AllowPartial $true) {
+            $matchedExpectedIndex = $e
+            break
+        }
+    }
+    if ($matchedExpectedIndex -lt 0 -or $matchedExpectedIndex -ge ($expectedLines.Count - 1)) { return $StartIndex }
+
+    $expectedIndex = $matchedExpectedIndex + 1
+    $bestEnd = $StartIndex
+    $parts = @()
+    for ($j = $StartIndex + 1; $j -lt $Lines.Count -and $expectedIndex -lt $expectedLines.Count; $j++) {
+        $t = $Lines[$j].Trim()
+        if (-not $t) {
+            if ($parts.Count -gt 0) { break }
+            continue
+        }
+
+        $parts += $t
+        $candidate = Normalize-AgentTalkReplyText ($parts -join ' ')
+        $expected = Normalize-AgentTalkReplyText $expectedLines[$expectedIndex]
+        if (-not $candidate -or -not $expected) { continue }
+
+        if ($candidate.Equals($expected, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $candidate.StartsWith($expected, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $bestEnd = $j
+            $expectedIndex++
+            $parts = @()
+            continue
+        }
+        if ($expected.StartsWith($candidate, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $bestEnd = $j
+            continue
+        }
+        break
+    }
+    return $bestEnd
+}
+
 function Find-AgentTalkSplitInputEnd {
     param(
         [string[]]$Lines,
         [int]$PromptIndex,
         [string]$LastInputText
     )
-    $expected = Normalize-AgentTalkReplyText (Get-AgentTalkFirstContentLine $LastInputText)
-    if (-not $Lines -or $PromptIndex -ge ($Lines.Count - 1) -or -not $expected) { return -1 }
+    $expectedLines = @(Get-AgentTalkContentLines $LastInputText)
+    if (-not $Lines -or $PromptIndex -ge ($Lines.Count - 1) -or $expectedLines.Count -eq 0) { return -1 }
 
     $parts = @()
     $bestEnd = -1
+    $expectedIndex = 0
     for ($j = $PromptIndex + 1; $j -lt $Lines.Count; $j++) {
         $t = $Lines[$j].Trim()
         if (-not $t) {
@@ -192,9 +254,16 @@ function Find-AgentTalkSplitInputEnd {
 
         $parts += $t
         $candidate = Normalize-AgentTalkReplyText ($parts -join ' ')
+        $expected = Normalize-AgentTalkReplyText $expectedLines[$expectedIndex]
         if (-not $candidate) { continue }
-        if ($candidate.Equals($expected, [System.StringComparison]::OrdinalIgnoreCase)) { return $j }
-        if ($candidate.StartsWith($expected, [System.StringComparison]::OrdinalIgnoreCase)) { return $j }
+        if ($candidate.Equals($expected, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $candidate.StartsWith($expected, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $bestEnd = $j
+            $expectedIndex++
+            if ($expectedIndex -ge $expectedLines.Count) { return $bestEnd }
+            $parts = @()
+            continue
+        }
         if ($expected.StartsWith($candidate, [System.StringComparison]::OrdinalIgnoreCase)) {
             $bestEnd = $j
             continue
@@ -225,8 +294,9 @@ function Limit-AgentTalkReplyToLastInput {
         }
 
         if (Test-AgentTalkInputMatch -ScreenInput $candidate -LastInput $LastInputText -AllowPartial ([bool]$InputPrefixPattern)) {
-            if ($i -ge ($allLines.Count - 1)) { return '' }
-            return (($allLines[($i + 1)..($allLines.Count - 1)]) -join "`n").Trim()
+            $inputEnd = Find-AgentTalkFollowingInputEnd -Lines $allLines -StartIndex $i -MatchedInputLine $candidate -LastInputText $LastInputText
+            if ($inputEnd -ge ($allLines.Count - 1)) { return '' }
+            return (($allLines[($inputEnd + 1)..($allLines.Count - 1)]) -join "`n").Trim()
         }
         if ($InputPrefixPattern -and -not $candidate) {
             $inputEnd = Find-AgentTalkSplitInputEnd -Lines $allLines -PromptIndex $i -LastInputText $LastInputText

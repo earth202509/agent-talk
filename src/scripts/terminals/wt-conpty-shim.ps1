@@ -305,7 +305,9 @@ public static class WtConptyShim
     {
         var stdout = Console.OpenStandardOutput();
         var utf8 = new UTF8Encoding(false);
+        var decoder = utf8.GetDecoder();
         var buffer = new byte[4096];
+        var chars = new char[utf8.GetMaxCharCount(buffer.Length)];
         while (true)
         {
             int n;
@@ -313,7 +315,8 @@ public static class WtConptyShim
             if (n <= 0) break;
             stdout.Write(buffer, 0, n);
             stdout.Flush();
-            log.Write(utf8.GetString(buffer, 0, n));
+            int charCount = decoder.GetChars(buffer, 0, n, chars, 0, false);
+            if (charCount > 0) log.Write(chars, 0, charCount);
         }
     }
 

@@ -4,7 +4,7 @@ Standalone source workspace for the `agent-talk` skill.
 
 ## Layout
 
-- `src/` - skill source, scripts, adapters, and references.
+- `src/` - skill source, scripts, and adapters.
 - `tests/agent-talk.tests.ps1` - focused tests for reply extraction and adapter behavior.
 - `scripts/deploy-skills.ps1` - deploys `agent-talk` to local agent skill directories.
 
@@ -24,7 +24,7 @@ Deploy:
 .\scripts\deploy-skills.ps1
 ```
 
-Deploy only to Codex:
+Skip deployment targets:
 
 ```powershell
 .\scripts\deploy-skills.ps1 -SkipClaude -SkipGemini -SkipPi
