@@ -1,0 +1,12 @@
+.claude/
+.signal_*.txt
+signal.md
+
+# Runtime agent-talk session state.
+src/state/sessions.json
+src/state/results/
+src/state/wt-conpty/
+
+# Usual local noise.
+.DS_Store
+Thumbs.db

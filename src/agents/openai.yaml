@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Talk"
+  short_description: "Configurable local terminal-agent orchestration"
+  default_prompt: "Use $agent-talk to route work to configurable terminal-based coding agents and review their results."
