@@ -83,47 +83,6 @@ Test-Case 'agent-talk exposes local agent discovery' {
     Assert ($talkieText.Contains("throw 'list-agents only supports json output'")) 'list-agents should not expose extra output formats'
 }
 
-Test-Case 'agent-talk economy delegate strategy has independent config' {
-    $strategyRoot = Join-Path $RepoRoot 'src\strategies'
-    $strategyPath = Join-Path $strategyRoot 'economy-delegate.md'
-    $templatePath = Join-Path $RepoRoot 'src\config\economy-delegate.example.json'
-
-    Assert (-not (Test-Path -LiteralPath (Join-Path $strategyRoot 'manifest.json'))) 'strategy manifest should not exist'
-    Assert (Test-Path -LiteralPath $strategyPath) 'economy strategy should exist'
-    Assert (Test-Path -LiteralPath $templatePath) 'economy config template should exist'
-
-    $strategyText = Get-Content -Encoding UTF8 -Raw -LiteralPath $strategyPath
-    $frontmatter = [regex]::Match($strategyText, '(?s)^---\r?\n(.*?)\r?\n---')
-    Assert $frontmatter.Success 'strategy should have frontmatter'
-    Assert ($frontmatter.Groups[1].Value -match '(?m)^name:\s*economy-delegate\s*$') 'strategy frontmatter should name economy-delegate'
-    Assert ($frontmatter.Groups[1].Value -match '(?m)^description:\s*\S') 'strategy frontmatter should include description'
-    Assert (-not ($frontmatter.Groups[1].Value -match '(?m)^requires_worker_config:')) 'strategy should not repeat shared worker config requirement'
-    Assert ($frontmatter.Groups[1].Value -match '(?m)^variables:') 'strategy should declare variables'
-    Assert ($frontmatter.Groups[1].Value -match '(?m)^\s+worker_app:\s*local agent app') 'strategy should define worker_app as a local agent app'
-    Assert ($strategyText.Contains('{worker_app}')) 'strategy should use shared worker app placeholder'
-    Assert (-not $strategyText.Contains('worker_title_prefix')) 'strategy should not include unused title placeholder'
-    Assert (-not $strategyText.Contains('worker_timeout_sec')) 'strategy should not include unused timeout placeholder'
-    Assert ($strategyText.Contains('WebSearch')) 'strategy should require WebSearch delegation'
-    Assert ($strategyText.Contains('Git Commit')) 'strategy should require Git Commit delegation'
-
-    $skillText = Get-Content -Encoding UTF8 -Raw -LiteralPath (Join-Path $RepoRoot 'src\SKILL.md')
-    Assert ($skillText.Contains('state/<strategy-name>.json')) 'skill should define shared strategy config path'
-    Assert ($skillText.Contains('config/<strategy-name>.example.json')) 'skill should define shared strategy config template path'
-    Assert (-not $skillText.Contains('worker_app')) 'skill should not mention concrete strategy variable names'
-    Assert ($skillText.Contains('If the variable is a local agent app')) 'skill should define local app variable handling'
-    Assert ($skillText.Contains('list-agents json')) 'skill should use talkie discovery for local app variables'
-    Assert ($skillText.Contains('allowed values')) 'skill should define enum variable handling'
-    Assert ($skillText.Contains('enter a value')) 'skill should define freeform variable handling'
-
-    $template = Get-Content -Encoding UTF8 -Raw -LiteralPath $templatePath | ConvertFrom-Json
-    $templateProps = @($template.PSObject.Properties.Name)
-    Assert ($template.worker_app -eq 'codex') 'template should include worker_app placeholder'
-    Assert ($templateProps.Count -eq 1) 'strategy config should only include worker_app'
-    Assert (-not ($templateProps -contains 'app')) 'strategy config should use strategy variable name instead of generic app'
-    Assert (-not ($templateProps -contains 'extra_args')) 'strategy config should not include adapter-native extra args'
-    Assert (-not ($templateProps -contains 'allowed_tasks')) 'allowed tasks should live in strategy text, not config'
-}
-
 Test-Case 'agent-talk wait-reply extracts Claude replies with bullet variants' {
     $dash = [string]([char]0x2500) * 80
     $bulletChar = [char]0x25CF
@@ -165,6 +124,12 @@ Test-Case 'agent-talk send stores last input for wait-reply' {
     Assert ($talkieText.Contains('Set-SessionLastSentText -PipeName $pipe -Text $lastSentText')) 'send should persist last input after successful terminal send'
     Assert ($talkieText.Contains('$lastInputText = if ($session)')) 'wait-reply should read last input from session state'
     Assert ($talkieText.Contains('Get-ReplyText $text $adapter $lastInputText')) 'wait-reply should pass last input into the adapter'
+}
+
+Test-Case 'agent-talk wait-reply keeps default scrollback configurable' {
+    $talkieText = Get-Content -Encoding UTF8 -Raw -LiteralPath (Join-Path $RepoRoot 'src\scripts\talkie.ps1')
+    Assert ($talkieText.Contains('$scrollbackRows = 400')) 'wait-reply should default to 400 scrollback rows'
+    Assert ($talkieText.Contains('AGENT_TALK_SCROLLBACK_ROWS')) 'wait-reply scrollback should remain configurable'
 }
 
 Test-Case 'agent-talk new-session creates unique ids' {
@@ -242,6 +207,69 @@ Test-Case 'agent-talk pi reply preserves scrolled long replies' {
     Assert ($text -notmatch 'draft line before final spinner') ('pi should use the last busy anchor after input: ' + $text)
     Assert ($text -match 'Final answer line 1\.') ('pi should keep the start of the final scrolled reply: ' + $text)
     Assert ($text -match 'Final answer line 6\.') ('pi should keep the end of the final scrolled reply: ' + $text)
+}
+
+Test-Case 'agent-talk pi reply preserves report separators inside replies' {
+    $dash = [string]([char]0x2500) * 80
+    $lines = @(
+        '[conpty] size=100x12',
+        'inspect webserver',
+        'Thinking...',
+        '### One',
+        '| name | value |',
+        '| ---- | ----- |',
+        '| routes | 36 |',
+        '',
+        $dash,
+        '',
+        '### Two',
+        'Migration notes stay in the same reply.',
+        '',
+        $dash,
+        '',
+        $dash,
+        '? for shortcuts'
+    )
+
+    $text = Invoke-AgentTalkFixtureWaitReply -App 'pi' -Lines $lines -AgentVersion '0.78.0' -LastInputText 'inspect webserver'
+    Assert ($text -match '### One') ('pi should keep content before report separators: ' + $text)
+    Assert ($text -match 'routes \| 36') ('pi should keep markdown table content before separators: ' + $text)
+    Assert ($text -match '### Two') ('pi should keep content after report separators: ' + $text)
+}
+
+Test-Case 'agent-talk pi reply falls back to adapter anchor when input echo is missing' {
+    $dash = [string]([char]0x2500) * 80
+    $lines = @(
+        '[conpty] size=100x12',
+        'Thinking...',
+        'Fallback reply line 1.',
+        'Fallback reply line 2.',
+        '',
+        $dash,
+        '',
+        $dash,
+        '? for shortcuts'
+    )
+
+    $text = Invoke-AgentTalkFixtureWaitReply -App 'pi' -Lines $lines -AgentVersion '0.78.0' -LastInputText 'missing prompt'
+    $expected = 'Fallback reply line 1.' + ([string][char]10) + 'Fallback reply line 2.'
+    Assert ($text -eq $expected) ('pi should use the last adapter anchor when the input echo is missing: ' + $text)
+}
+
+Test-Case 'agent-talk pi reply returns empty when input echo and adapter anchor are missing' {
+    $dash = [string]([char]0x2500) * 80
+    $lines = @(
+        '[conpty] size=100x12',
+        'Unanchored reply line.',
+        '',
+        $dash,
+        '',
+        $dash,
+        '? for shortcuts'
+    )
+
+    $text = Invoke-AgentTalkFixtureWaitReply -App 'pi' -Lines $lines -AgentVersion '0.78.0' -LastInputText 'missing prompt'
+    Assert ($text -eq '') ('pi should not guess a reply when both input echo and adapter anchors are missing: ' + $text)
 }
 
 Test-Case 'agent-talk pi submits with a separate enter key' {

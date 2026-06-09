@@ -327,6 +327,24 @@ function Limit-AgentTalkReplyToLastAnchor {
     return $Text
 }
 
+function Limit-AgentTalkReplyToLastAnchorStrict {
+    param(
+        [string]$Text,
+        [string[]]$AnchorPatterns = @()
+    )
+    if (-not $Text -or -not $AnchorPatterns) { return '' }
+    $allLines = @($Text -split "`n")
+    for ($i = $allLines.Count - 1; $i -ge 0; $i--) {
+        $t = $allLines[$i].Trim()
+        foreach ($pattern in $AnchorPatterns) {
+            if ($pattern -and $t -match $pattern) {
+                return (($allLines[$i..($allLines.Count - 1)]) -join "`n").Trim()
+            }
+        }
+    }
+    return ''
+}
+
 function Limit-AgentTalkReplyBeforeFirstAnchor {
     param(
         [string]$Text,
@@ -362,15 +380,18 @@ function Get-AgentTalkReplyBlock {
         [switch]$RequireReplyPrefix
     )
     if (-not $Text) { return '' }
-    $dash = [char]0x2500
-    $upperBlock = [char]0x2594
     $Text = Remove-AgentTalkInputAreaTail $Text
 
     $startedAfterInput = $false
+    $lastInputNotFound = $false
     if ($LastInputText) {
-        $Text = Limit-AgentTalkReplyToLastInput -Text $Text -LastInputText $LastInputText -InputPrefixPattern $InputPrefixPattern
-        if (-not $Text) { return '' }
-        $startedAfterInput = $true
+        $afterInput = Limit-AgentTalkReplyToLastInput -Text $Text -LastInputText $LastInputText -InputPrefixPattern $InputPrefixPattern
+        if ($afterInput) {
+            $Text = $afterInput
+            $startedAfterInput = $true
+        } else {
+            $lastInputNotFound = $true
+        }
     } elseif ($StartAfterLastPatterns -and @($StartAfterLastPatterns).Count -gt 0) {
         $Text = Limit-AgentTalkReplyToLastAnchor -Text $Text -AnchorPatterns $StartAfterLastPatterns
         if ($Text) {
@@ -385,7 +406,16 @@ function Get-AgentTalkReplyBlock {
     if ($ReplyPrefixPattern -and ($PreferReplyPrefixAfterStart -or -not $RequireReplyPrefix)) {
         $anchors += $ReplyPrefixPattern
     }
-    if ($anchors.Count -gt 0) { $Text = Limit-AgentTalkReplyToLastAnchor -Text $Text -AnchorPatterns $anchors }
+    if ($anchors.Count -gt 0) {
+        if ($lastInputNotFound) {
+            $Text = Limit-AgentTalkReplyToLastAnchorStrict -Text $Text -AnchorPatterns $anchors
+            if (-not $Text) { return '' }
+        } else {
+            $Text = Limit-AgentTalkReplyToLastAnchor -Text $Text -AnchorPatterns $anchors
+        }
+    } elseif ($lastInputNotFound) {
+        return ''
+    }
     if ($ReplyAnchorConsumesLine -and $Text) {
         $lines = @($Text -split "`n")
         if ($lines.Count -le 1) { return '' }
@@ -394,7 +424,7 @@ function Get-AgentTalkReplyBlock {
     if ($EndAnchorPatterns.Count -gt 0) { $Text = Limit-AgentTalkReplyBeforeFirstAnchor -Text $Text -AnchorPatterns $EndAnchorPatterns }
     if (-not $startedAfterInput) { $Text = Skip-BeforeLastPattern $Text $BusyPatterns }
 
-    $boundaries = @($BoundaryPatterns) + @('^[\s\-' + $dash + $upperBlock + ']+$')
+    $boundaries = @($BoundaryPatterns)
     if ($RequireReplyPrefix -and $ReplyPrefixPattern) {
         $allLines = @($Text -split "`n")
         $startIndex = -1
