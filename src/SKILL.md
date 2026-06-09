@@ -34,6 +34,9 @@ Session state is stored in `state/wt-conpty/sessions.json` with `session_id`,
    ```
 4. Send the task (base64-encode to avoid quoting issues):
    ```powershell
+   $task = @'
+   ...task text, including Markdown backticks if needed...
+   '@
    $encodedTask = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($task))
    & $TALKIE send $pane "@base64:$encodedTask"
    ```

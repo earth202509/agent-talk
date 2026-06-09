@@ -13,8 +13,10 @@
     Args     = New-AgentTalkPowerShellArgs -CommandName 'codex' -ExtraArgs $ExtraArgs
     AppendMessageNewline = $false
     SubmitSequence = "`r`n"
+    SubmitSequenceParts = @("$([char]27)", "`r`n")
     SubmitSequenceSeparate = $true
     SubmitDelayMilliseconds = 800
+    SubmitSequencePartDelayMilliseconds = 300
     UsesFullScreenTui = { $true }
 
     GetStatus = {

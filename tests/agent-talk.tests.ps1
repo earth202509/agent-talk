@@ -126,6 +126,15 @@ Test-Case 'agent-talk send stores last input for wait-reply' {
     Assert ($talkieText.Contains('Get-ReplyText $text $adapter $lastInputText')) 'wait-reply should pass last input into the adapter'
 }
 
+Test-Case 'agent-talk send defaults to bracketed paste' {
+    $talkieText = Get-Content -Encoding UTF8 -Raw -LiteralPath (Join-Path $RepoRoot 'src\scripts\talkie.ps1')
+    Assert ($talkieText.Contains("`$pasteMode = 'bracketed'")) 'send should default to bracketed paste'
+    Assert ($talkieText.Contains("Get-Prop `$adapter 'PasteMode'")) 'send should read adapter paste mode'
+    Assert ($talkieText.Contains("'bracketed'")) 'send should support bracketed paste mode'
+    Assert ($talkieText.Contains('[200~')) 'send should start bracketed paste before payload'
+    Assert ($talkieText.Contains('[201~')) 'send should end bracketed paste after payload'
+}
+
 Test-Case 'agent-talk wait-reply keeps default scrollback configurable' {
     $talkieText = Get-Content -Encoding UTF8 -Raw -LiteralPath (Join-Path $RepoRoot 'src\scripts\talkie.ps1')
     Assert ($talkieText.Contains('$scrollbackRows = 400')) 'wait-reply should default to 400 scrollback rows'
@@ -162,6 +171,19 @@ Test-Case 'agent-talk codex reply uses last input and bullet anchor' {
 
     $text = Invoke-AgentTalkFixtureWaitReply -App 'codex' -Lines $lines -AgentVersion '0.136.0' -LastInputText 'hello'
     Assert ($text -eq 'Hello.') ('codex should extract the bullet reply after last input: ' + $text)
+}
+
+Test-Case 'agent-talk codex closes completion popup before submit' {
+    . (Join-Path $RepoRoot 'src\scripts\agents\shared.ps1')
+    $adapter = & (Join-Path $RepoRoot 'src\scripts\agents\codex.ps1') -ExtraArgs ''
+    $talkieText = Get-Content -Encoding UTF8 -Raw -LiteralPath (Join-Path $RepoRoot 'src\scripts\talkie.ps1')
+
+    Assert ($adapter.SubmitSequenceSeparate -eq $true) 'codex should submit with a separate key sequence'
+    Assert ([int][char]$adapter.SubmitSequenceParts[0][0] -eq 27) 'codex submit should start with Escape to close slash/model completion'
+    Assert ($adapter.SubmitSequenceParts[1] -eq "`r`n") 'codex submit should finish with CRLF'
+    Assert ($adapter.SubmitSequencePartDelayMilliseconds -ge 300) 'codex should pause between Escape and Enter'
+    Assert ($talkieText.Contains('SubmitSequenceParts')) 'send should support split submit sequences'
+    Assert ($talkieText.Contains('SubmitSequencePartDelayMilliseconds')) 'send should support delays between split submit sequences'
 }
 
 Test-Case 'agent-talk pi reply uses last input and thinking anchor' {

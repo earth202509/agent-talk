@@ -774,9 +774,12 @@ function Invoke-Send {
     $message = Decode-Message $Rest[1]
     $lastSentText = $message
     $submitSequence = $null
+    $submitSequenceParts = @()
     $submitSequenceSeparate = $false
     $submitDelayMilliseconds = 150
+    $submitSequencePartDelayMilliseconds = 150
     $appendMessageNewline = $true
+    $pasteMode = 'bracketed'
     $session = Get-SessionByPipe $pipe
     if ($session) {
         $adapter = Load-AdapterForApp ([string]$session.app) ([string](Get-Prop $session 'agent_version'))
@@ -784,11 +787,21 @@ function Invoke-Send {
         if ($null -ne $appendValue) { $appendMessageNewline = [bool]$appendValue }
         $submitSequence = Get-Prop $adapter 'SubmitSequence'
         if ($submitSequence -is [scriptblock]) { $submitSequence = & $submitSequence }
+        $submitSequencePartsValue = Get-Prop $adapter 'SubmitSequenceParts'
+        if ($submitSequencePartsValue -is [scriptblock]) { $submitSequencePartsValue = & $submitSequencePartsValue }
+        if ($submitSequencePartsValue) { $submitSequenceParts = @($submitSequencePartsValue) }
         $submitSequenceSeparate = [bool](Get-Prop $adapter 'SubmitSequenceSeparate')
         $delayValue = Get-Prop $adapter 'SubmitDelayMilliseconds'
         if ($delayValue) { $submitDelayMilliseconds = [int]$delayValue }
+        $partDelayValue = Get-Prop $adapter 'SubmitSequencePartDelayMilliseconds'
+        if ($partDelayValue) { $submitSequencePartDelayMilliseconds = [int]$partDelayValue }
+        $pasteModeValue = Get-Prop $adapter 'PasteMode'
+        if ($pasteModeValue) { $pasteMode = [string]$pasteModeValue }
     }
     if ($appendMessageNewline -and $message -notmatch "(`r|`n)$") { $message += "`r`n" }
+    if ($pasteMode -eq 'bracketed' -and $message.Length -gt 0) {
+        $message = "$([char]27)[200~$message$([char]27)[201~"
+    }
     if ($submitSequence -and -not $submitSequenceSeparate) { $message += [string]$submitSequence }
     if ($message.Length -gt 0) {
         $sendOut = Invoke-Terminal -Arguments @('send', $pipe, $message)
@@ -798,9 +811,15 @@ function Invoke-Send {
     }
     if ($submitSequence -and $submitSequenceSeparate) {
         if ($submitDelayMilliseconds -gt 0) { Start-Sleep -Milliseconds $submitDelayMilliseconds }
-        $submitOut = Invoke-Terminal -Arguments @('send', $pipe, [string]$submitSequence)
-        if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
-            throw "terminal submit failed (exit $LASTEXITCODE): $($submitOut -join "`n")"
+        $submitItems = if ($submitSequenceParts.Count -gt 0) { @($submitSequenceParts) } else { @($submitSequence) }
+        for ($i = 0; $i -lt $submitItems.Count; $i++) {
+            if ($i -gt 0 -and $submitSequencePartDelayMilliseconds -gt 0) {
+                Start-Sleep -Milliseconds $submitSequencePartDelayMilliseconds
+            }
+            $submitOut = Invoke-Terminal -Arguments @('send', $pipe, [string]$submitItems[$i])
+            if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+                throw "terminal submit failed (exit $LASTEXITCODE): $($submitOut -join "`n")"
+            }
         }
     }
     Set-SessionLastSentText -PipeName $pipe -Text $lastSentText
