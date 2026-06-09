@@ -1,4 +1,4 @@
 interface:
   display_name: "Agent Talk"
-  short_description: "Configurable local terminal-agent orchestration"
-  default_prompt: "Use $agent-talk to route work to configurable terminal-based coding agents and review their results."
+  short_description: "Let your local agents talk to each other directly"
+  default_prompt: "Use $agent-talk to ask pi: 和 pi 展开一场关于 AI 泡沫是否存在的辩论."

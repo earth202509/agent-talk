@@ -1,10 +1,10 @@
 ---
 name: agent-talk
 description: >
-  Local multi-agent communication for terminal-based coding agents via Windows
-  Terminal and ConPTY. Use when the main brain needs to open a worker agent
-  (pi, claude, codex, antigravity/agy), send it a task, wait for its reply,
-  or manage its session lifecycle.
+  Let your local agents talk to each other directly. Open pi, claude, codex,
+  or antigravity/agy, send a message, wait for the reply, and continue the
+  conversation.
+  Example prompt: 和 pi 展开一场关于 AI 泡沫是否存在的辩论.
 ---
 
 # Agent Talk
