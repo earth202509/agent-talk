@@ -34,8 +34,8 @@ Session state is stored in `state/wt-conpty/sessions.json` with `session_id`,
    ```
 4. Send the task (base64-encode to avoid quoting issues):
    ```powershell
-   $enc = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($task))
-   & $TALKIE send $pane "@base64:$enc"
+   $encodedTask = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($task))
+   & $TALKIE send $pane "@base64:$encodedTask"
    ```
 5. Continue useful local work while the worker runs.
 6. Collect the reply:
@@ -43,6 +43,59 @@ Session state is stored in `state/wt-conpty/sessions.json` with `session_id`,
    & $TALKIE wait-reply $pane 600
    ```
 7. Review the actual diff and changed files before accepting the result.
+
+## Strategies
+
+Reusable delegation policies live outside this file under `strategies/`.
+When the user names a strategy such as `economy-delegate` or writes a command
+shaped like `/agent-talk:economy-delegate`, scan `strategies/*.md` and read
+only the frontmatter or first few lines needed to match `name` and
+`description`. After a match, read only the matching full strategy file.
+
+Each strategy owns its independent runtime config file, and the config name
+must match the strategy name:
+
+```text
+state/<strategy-name>.json
+```
+
+If a source template exists, it must also match the strategy name:
+
+```text
+config/<strategy-name>.example.json
+```
+
+Strategies may declare variables in frontmatter or a `Variables` section. When a
+strategy uses `{variable_name}`, resolve that variable from
+`state/<strategy-name>.json`.
+
+Resolve missing strategy variables as follows:
+
+- If the variable is a local agent app, run `& $TALKIE list-agents json`, show
+  only agents where `available` and `compatible` are both true, and ask the
+  user to choose one.
+- If the strategy provides a set of allowed values for a variable, show those
+  values and ask the user to choose one.
+- If the strategy does not provide allowed values, ask the user to enter a value.
+
+Store resolved variables by their variable names. For example:
+
+```json
+{
+  "<variable_name>": "<chosen-value>"
+}
+```
+
+If `state/<strategy-name>.json` does not exist, is empty, or lacks a required
+strategy variable:
+
+1. Ask the user to choose or enter each missing variable using the rules above.
+2. Create `state/<strategy-name>.json` from `config/<strategy-name>.example.json`
+   when the template exists; otherwise create it with the resolved variables.
+3. Continue only after every required strategy variable has a value.
+
+If no compatible local agents are available, report that setup is blocked and
+include the `list-agents` errors.
 
 ## Commands
 
@@ -53,6 +106,7 @@ $TALKIE = "<agent-talk-skill-dir>\scripts\talkie.ps1"
 & $TALKIE new-session <app> "<title>"
 
 # Send a task.
+$encodedTask = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($task))
 & $TALKIE send $pane "@base64:$encodedTask"
 
 # Wait for reply (default 60s; pass seconds as second arg).
@@ -60,8 +114,9 @@ $TALKIE = "<agent-talk-skill-dir>\scripts\talkie.ps1"
 
 # Check active sessions.
 & $TALKIE list-sessions
-& $TALKIE list-sessions tsv
-& $TALKIE list-sessions json
+
+# Get locally available agent apps for strategy variables.
+& $TALKIE list-agents json
 
 # Stop the current reply without closing the session.
 & $TALKIE interrupt $pane

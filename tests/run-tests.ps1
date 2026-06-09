@@ -48,6 +48,20 @@ function Assert($Condition, $Message) {
     }
 }
 
+function Get-FileHashWithRetry {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $lastError = $null
+    for ($i = 0; $i -lt 5; $i++) {
+        try {
+            return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash
+        } catch {
+            $lastError = $_
+            Start-Sleep -Milliseconds 200
+        }
+    }
+    throw $lastError
+}
+
 function Get-SkillFrontmatter($SkillPath) {
     $skillMd = Join-Path $SkillPath 'SKILL.md'
     Assert (Test-Path -LiteralPath $skillMd) "Missing SKILL.md: $SkillPath"
@@ -141,8 +155,8 @@ Test-Case 'Deploy script copies agent-talk and skips runtime state' {
             $relative = 'agent-talk\' + $sourceFile.FullName.Substring((Join-Path $RepoRoot 'src').Length + 1)
             $targetFile = Join-Path $target $relative
             Assert (Test-Path -LiteralPath $targetFile) "Missing deployed file: $relative"
-            $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $sourceFile.FullName).Hash
-            $targetHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $targetFile).Hash
+            $sourceHash = Get-FileHashWithRetry $sourceFile.FullName
+            $targetHash = Get-FileHashWithRetry $targetFile
             Assert ($sourceHash -eq $targetHash) "Deployed file hash mismatch: $relative"
         }
     } finally {

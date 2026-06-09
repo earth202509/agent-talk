@@ -1,6 +1,6 @@
 ﻿param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet('new-session', 'send', 'interrupt', 'wait-reply', 'list-sessions', 'kill-session', 'get-screen', '_health-check')]
+    [ValidateSet('new-session', 'send', 'interrupt', 'wait-reply', 'list-sessions', 'list-agents', 'kill-session', 'get-screen', '_health-check')]
     [string]$Command,
 
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -261,16 +261,9 @@ function Get-LiveSessions {
 
 function Decode-Message {
     param([string]$Text)
-    if ($Text -eq '-') {
-        return [Console]::In.ReadToEnd()
-    }
     if ($Text.StartsWith('@base64:')) {
         $b64 = $Text.Substring('@base64:'.Length)
         return [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64))
-    }
-    if ($Text.StartsWith('@file:')) {
-        $path = $Text.Substring('@file:'.Length) -replace '/', '\'
-        return Get-Content -Encoding UTF8 -Raw -LiteralPath $path
     }
     return $Text
 }
@@ -623,6 +616,73 @@ function Resolve-AppSpec {
     return [pscustomobject]$adapterResult
 }
 
+function Get-AgentAdapterFallbackValue {
+    param([string]$Text, [string]$Name)
+    $match = [regex]::Match($Text, "(?m)^\s*$Name\s*=\s*'([^']+)'")
+    if ($match.Success) { return $match.Groups[1].Value }
+    return ''
+}
+
+function Get-AgentAdapterFallbackAliases {
+    param([string]$Text)
+    $match = [regex]::Match($Text, "(?m)^\s*Aliases\s*=\s*@\(([^)]*)\)")
+    if (-not $match.Success) { return @() }
+    $aliases = @()
+    foreach ($aliasMatch in [regex]::Matches($match.Groups[1].Value, "'([^']+)'")) {
+        $aliases += $aliasMatch.Groups[1].Value
+    }
+    return $aliases
+}
+
+function Get-AgentAdapterRecords {
+    $records = @()
+    foreach ($script in Get-ChildItem -LiteralPath $AdaptersDir -Filter '*.ps1' | Sort-Object Name) {
+        if ($script.BaseName -eq 'shared') { continue }
+        $text = Get-Content -Encoding UTF8 -Raw -LiteralPath $script.FullName
+        $app = Get-AgentAdapterFallbackValue $text 'App'
+        if (-not $app) { $app = $script.BaseName }
+        $aliases = @(Get-AgentAdapterFallbackAliases $text)
+        $commandName = Get-AgentAdapterFallbackValue $text 'AgentCommand'
+        $adapterVersion = Get-AgentAdapterFallbackValue $text 'AdapterVersion'
+        $minVersion = Get-AgentAdapterFallbackValue $text 'AgentVersionMin'
+        $version = ''
+        $available = $false
+        $compatible = $false
+        $errorMessage = ''
+
+        try {
+            $adapter = [hashtable](& $script.FullName -ExtraArgs '__default__')
+            if ($adapter.App) { $app = [string]$adapter.App }
+            if ($adapter.Aliases) { $aliases = @($adapter.Aliases) }
+            if ($adapter.AdapterVersion) { $adapterVersion = [string]$adapter.AdapterVersion }
+            if ($adapter.AgentVersionMin) { $minVersion = [string]$adapter.AgentVersionMin }
+            $commandName = Get-AgentTalkAdapterCommandName $adapter
+            $version = Get-AgentTalkAgentVersion $adapter
+            $available = $true
+            $compatible = Test-AgentTalkVersionMin -Version $version -Min $minVersion
+            if (-not $compatible) {
+                $errorMessage = "agent version '$version' is lower than required '$minVersion'"
+            }
+        } catch {
+            $errorMessage = $_.Exception.Message
+        }
+
+        $records += [pscustomobject][ordered]@{
+            app = $app
+            aliases = $aliases
+            command = $commandName
+            available = $available
+            compatible = $compatible
+            agent_version = $version
+            agent_version_min = $minVersion
+            adapter_version = $adapterVersion
+            adapter_path = $script.FullName
+            error = $errorMessage
+        }
+    }
+    return @($records)
+}
+
 function Test-AdapterFullScreenTui {
     param($Adapter)
     $value = Get-Prop $Adapter 'UsesFullScreenTui'
@@ -876,6 +936,16 @@ function Invoke-ListSessions {
     }
 }
 
+function Invoke-ListAgents {
+    $format = if ($Rest.Count -ge 1) { $Rest[0] } else { 'json' }
+    $records = @(Get-AgentAdapterRecords)
+    if ($format -eq 'json') {
+        $records | ConvertTo-Json -Depth 8
+        return
+    }
+    throw 'list-agents only supports json output'
+}
+
 function Invoke-KillPane {
     if ($Rest.Count -lt 1) { throw 'kill-session requires <pane>' }
     $pipe = $Rest[0]
@@ -903,6 +973,7 @@ switch ($Command) {
     'get-screen' { Invoke-Get }
     'wait-reply' { Invoke-WaitReply }
     'list-sessions' { Invoke-ListSessions }
+    'list-agents' { Invoke-ListAgents }
     'kill-session' { Invoke-KillPane }
     '_health-check' {
         Invoke-Terminal -Arguments @('_health-check')
