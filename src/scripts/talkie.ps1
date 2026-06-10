@@ -531,13 +531,70 @@ function Get-StableIdleMilliseconds {
     return $milliseconds
 }
 
+function Get-LogTailMaxBytes {
+    $maxBytes = 1048576
+    if ($env:AGENT_TALK_LOG_TAIL_BYTES) {
+        $maxBytes = [Math]::Max(4096, [int]$env:AGENT_TALK_LOG_TAIL_BYTES)
+    }
+    return $maxBytes
+}
+
+function Read-LogTail {
+    # Reads at most Get-LogTailMaxBytes from the end of the log so wait-reply
+    # cost stays bounded on long sessions. The shim writes the
+    # "[conpty] size=COLSxROWS" header at the start of the file, so when the
+    # head is cut off it is re-read separately and prepended.
+    param([string]$LogPath)
+    $maxTailBytes = Get-LogTailMaxBytes
+    $utf8 = [System.Text.UTF8Encoding]::new($false)
+    $stream = [System.IO.File]::Open($LogPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+    try {
+        $length = $stream.Length
+        if ($length -le $maxTailBytes) {
+            $bytes = New-Object byte[] ([int]$length)
+            $read = 0
+            while ($read -lt $bytes.Length) {
+                $n = $stream.Read($bytes, $read, $bytes.Length - $read)
+                if ($n -le 0) { break }
+                $read += $n
+            }
+            return $utf8.GetString($bytes, 0, $read)
+        }
+
+        $headBytes = New-Object byte[] 4096
+        $headRead = 0
+        while ($headRead -lt $headBytes.Length) {
+            $n = $stream.Read($headBytes, $headRead, $headBytes.Length - $headRead)
+            if ($n -le 0) { break }
+            $headRead += $n
+        }
+        $head = $utf8.GetString($headBytes, 0, $headRead)
+        $sizeLine = ''
+        if ($head -match '(?m)^(\[conpty\] size=\d+x\d+)') { $sizeLine = $matches[1] + "`n" }
+
+        [void]$stream.Seek($length - $maxTailBytes, [System.IO.SeekOrigin]::Begin)
+        $tailBytes = New-Object byte[] ([int]$maxTailBytes)
+        $tailRead = 0
+        while ($tailRead -lt $tailBytes.Length) {
+            $n = $stream.Read($tailBytes, $tailRead, $tailBytes.Length - $tailRead)
+            if ($n -le 0) { break }
+            $tailRead += $n
+        }
+        $offset = 0
+        while ($offset -lt $tailRead -and ($tailBytes[$offset] -band 0xC0) -eq 0x80) { $offset++ }
+        return $sizeLine + $utf8.GetString($tailBytes, $offset, $tailRead - $offset)
+    } finally {
+        $stream.Dispose()
+    }
+}
+
 function Read-SessionText {
     param([string]$PipeName, [int]$ScrollbackRows = 0)
     $s = Get-SessionByPipe $PipeName
     if (-not $s) { return $null }
     $logPath = [string](Get-TransportValue $s 'log_path')
     if (-not (Test-Path -LiteralPath $logPath)) { return '' }
-    $raw = Get-Content -Encoding UTF8 -Raw -LiteralPath $logPath
+    $raw = Read-LogTail -LogPath $logPath
     ConvertTo-PlainText $raw $ScrollbackRows
 }
 

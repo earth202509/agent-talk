@@ -37,11 +37,11 @@ function Close-WindowsTerminalTabByTitle {
             for ($i = 0; $i -lt $tabs.Count; $i++) {
                 $tab = $tabs.Item($i)
                 if ([string]$tab.Current.Name -ne $Title) { continue }
+                # The close button is the last button on the tab header,
+                # regardless of UI language.
                 $buttons = $tab.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCond)
-                for ($j = 0; $j -lt $buttons.Count; $j++) {
-                    $button = $buttons.Item($j)
-                    $name = [string]$button.Current.Name
-                    if ($name -and $name -notmatch '(?i)close|关闭') { continue }
+                if ($buttons.Count -gt 0) {
+                    $button = $buttons.Item($buttons.Count - 1)
                     try {
                         $invoke = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
                         $invoke.Invoke()
