@@ -1,11 +1,13 @@
 # Agent Talk Skill
 
-`agent-talk` lets local coding agents talk to each other from a Codex skill.
-It opens an agent session, sends messages, waits for replies, and keeps enough
-session state to continue the conversation later.
+`agent-talk` is a terminal-based bridge for local AI agents to talk, delegate,
+and collaborate across agent CLIs. It opens agent sessions, sends messages,
+waits for replies, and keeps enough session state to continue conversations
+later.
 
 The current implementation targets Windows and uses Windows Terminal, ConPTY,
-and named pipes for terminal control.
+and named pipes for terminal control. The repository also includes a Codex skill
+entry point so Codex can drive the same toolchain.
 
 ## Supported Agents
 
