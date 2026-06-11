@@ -7,9 +7,13 @@ and collaborate across agent CLIs. It opens agent sessions, sends messages,
 waits for replies, and keeps enough session state to continue conversations
 later.
 
-The current implementation targets Windows and uses Windows Terminal, ConPTY,
-and named pipes for terminal control. The repository also includes a Codex skill
-entry point so Codex can drive the same toolchain.
+Main agent: any AI agent that supports skills, including Claude, Codex Desktop,
+or terminal-based agents.
+
+Target agents supported: Codex, Claude, Pi, and Antigravity / `agy`.
+
+The current implementation targets Windows and uses Windows Terminal for local
+agent sessions.
 
 ## Supported Agents
 
