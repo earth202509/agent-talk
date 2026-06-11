@@ -32,10 +32,10 @@ Codex CLI, or Antigravity CLI, try this in your main agent:
 say hello to pi
 ```
 
+![Ask your agent to say hello to Pi](assets/helloworld1.png)
+
 Your agent will use the `agent-talk` skill to open a Windows Terminal session,
 enter Pi, send the message, wait for the reply, and return the result.
-
-![Ask your agent to say hello to Pi](assets/helloworld1.png)
 
 ![Agent Talk opens Pi in Windows Terminal](assets/helloworld2.png)
 
