@@ -1,5 +1,7 @@
 # Agent Talk Skill
 
+![Agent Talk promotional image](assets/agent-talk-promo-realistic-chat.png)
+
 `agent-talk` is a terminal-based bridge for local AI agents to talk, delegate,
 and collaborate across agent CLIs. It opens agent sessions, sends messages,
 waits for replies, and keeps enough session state to continue conversations
