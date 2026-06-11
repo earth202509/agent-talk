@@ -2,30 +2,58 @@
 
 ![Agent Talk promotional image](assets/agent-talk-promo-realistic-chat.png)
 
-`agent-talk` is a terminal-based bridge for local AI agents to talk, delegate,
-and collaborate across agent CLIs. It opens agent sessions, sends messages,
-waits for replies, and keeps enough session state to continue conversations
-later.
+Agent Talk is the simplest way on Windows to let different local AI agents talk
+to each other.
 
-Main agent: any AI agent that supports skills, including Claude, Codex Desktop,
-or terminal-based agents.
+You can use it from any AI agent that supports skills, including Claude, Codex
+Desktop, Codex CLI, or other terminal-based agents. Once installed, your main
+agent can open another local agent in Windows Terminal, send it a message, wait
+for the reply, and bring the result back into the conversation.
+
+Main agent: any AI agent that supports skills.
 
 Target agents supported: Codex, Claude, Pi, and Antigravity / `agy`.
 
-The current implementation targets Windows and uses Windows Terminal for local
-agent sessions.
+## Installation
 
-## Supported Agents
+Agent Talk is a skill. Ask your AI agent to install it:
 
-- Codex
-- Claude
-- Pi
-- Antigravity / `agy`
+```text
+Please install the agent-talk skill from:
+https://github.com/earth202509/agent-talk
+```
 
-## Repository Layout
+## First Use
+
+If you already have Pi installed, or another supported CLI such as Claude Code,
+Codex CLI, or Antigravity CLI, try this in your main agent:
+
+```text
+say hello to pi
+```
+
+Your agent will use the `agent-talk` skill to open a Windows Terminal session,
+enter Pi, send the message, wait for the reply, and return the result.
+
+![Ask your agent to say hello to Pi](assets/helloworld1.png)
+
+![Agent Talk opens Pi in Windows Terminal](assets/helloworld2.png)
+
+![Your main agent returns Pi's reply](assets/helloworld3.png)
+
+## For Developers
+
+### Requirements
+
+- Windows
+- PowerShell 5.1 or newer
+- Windows Terminal
+- Any local agent CLIs you want to use, available on `PATH`
+
+### Repository Layout
 
 - `src/` - skill source, scripts, adapters, and strategy notes.
-- `src/SKILL.md` - Codex skill entry point.
+- `src/SKILL.md` - skill entry point.
 - `src/scripts/talkie.ps1` - main command surface used by the skill.
 - `src/scripts/agents/` - agent-specific launch, submit, status, and reply parsing adapters.
 - `src/scripts/terminals/` - Windows Terminal + ConPTY transport.
@@ -35,35 +63,13 @@ agent sessions.
 Runtime state under `src/state/` is intentionally ignored and should not be
 committed.
 
-## Requirements
-
-- Windows
-- PowerShell 5.1 or newer
-- Windows Terminal
-- Any local agent CLIs you want to use, available on `PATH`
-
-## Installation
-
-Ask your AI agent to install it:
-
-```text
-Please install the agent-talk skill from:
-https://github.com/earth202509/agent-talk
-```
-
-If you prefer to install manually, clone this repository and run:
-
-```powershell
-.\scripts\deploy-skills.ps1
-```
-
-## Test
+### Test
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\run-tests.ps1
 ```
 
-## Manual Deploy
+### Manual Deploy
 
 Deploy to the default local skill directories:
 
@@ -83,7 +89,7 @@ Override a target directory:
 .\scripts\deploy-skills.ps1 -CodexRoot "$env:USERPROFILE\.codex\skills"
 ```
 
-## Command Surface
+### Command Surface
 
 All skill operations go through `src/scripts/talkie.ps1`.
 
@@ -98,7 +104,7 @@ Common commands:
 .\src\scripts\talkie.ps1 kill-session <session-id>
 ```
 
-## Configuration
+### Configuration
 
 Useful environment variables:
 
@@ -109,7 +115,7 @@ Useful environment variables:
 - `AGENT_TALK_TERMINAL_TOOL` - terminal backend override.
 - `WT_CONPTY_CC_STATE_DIR` - alternate runtime state directory for tests or debugging.
 
-## Development Notes
+### Development Notes
 
 - Keep `src/SKILL.md` concise and move optional details into scripts or references
   only when they are useful.
