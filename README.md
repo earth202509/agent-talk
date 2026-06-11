@@ -42,13 +42,28 @@ committed.
 - Windows Terminal
 - Any local agent CLIs you want to use, available on `PATH`
 
+## Installation
+
+Ask your AI agent to install it:
+
+```text
+Please install the agent-talk skill from:
+https://github.com/earth202509/agent-talk
+```
+
+If you prefer to install manually, clone this repository and run:
+
+```powershell
+.\scripts\deploy-skills.ps1
+```
+
 ## Test
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\run-tests.ps1
 ```
 
-## Deploy Locally
+## Manual Deploy
 
 Deploy to the default local skill directories:
 
