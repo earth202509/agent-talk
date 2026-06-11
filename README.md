@@ -41,6 +41,13 @@ enter Pi, send the message, wait for the reply, and return the result.
 
 ![Your main agent returns Pi's reply](assets/helloworld3.png)
 
+## What To Do Next
+
+You can ask different agents to discuss, debate, or research a question together.
+For a more practical workflow, use `/agent-talk economy-delegate` to hand off
+tasks to a cheaper agent. There are many more scenarios waiting for you to
+explore.
+
 ## For Developers
 
 ### Requirements
