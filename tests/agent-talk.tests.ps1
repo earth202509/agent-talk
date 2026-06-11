@@ -23,7 +23,7 @@ function New-AgentTalkFixtureState {
             pid = 0
             log_path = $LogPath
             meta_path = (Join-Path $metaDir 'pane-fixture.json')
-            workspace = 'D:\work\practice'
+            workspace = 'C:\workspace\practice'
         }
         created_at = '2026-06-08T00:00:00Z'
         updated_at = '2026-06-08T00:00:00Z'
@@ -71,6 +71,15 @@ Test-Case 'agent-talk current command surface is talkie-only' {
     Assert (Test-Path -LiteralPath (Join-Path $scriptDir 'terminals\wt-conpty.ps1')) 'wt-conpty terminal should exist'
     foreach ($legacy in @('spawn_worker.ps1', 'send_to_worker.ps1', 'orchestrate.ps1', 'transport.ps1', 'wt_conpty_cc.ps1')) {
         Assert (-not (Test-Path -LiteralPath (Join-Path $scriptDir $legacy))) "legacy script should not exist: $legacy"
+    }
+}
+
+Test-Case 'public files avoid machine-specific maintainer paths' {
+    $profilePathPattern = ('C:' + '\\Users\\' + '[^\\]+')
+    foreach ($relative in @('README.md', 'AGENTS.md', 'scripts\deploy-skills.ps1')) {
+        $text = Get-Content -Encoding UTF8 -Raw -LiteralPath (Join-Path $RepoRoot $relative)
+        Assert (-not ($text -match $profilePathPattern)) "$relative should not contain a maintainer user profile path"
+        Assert (-not ($text -match 'D:\\work')) "$relative should not contain a maintainer workspace path"
     }
 }
 
@@ -141,6 +150,14 @@ Test-Case 'agent-talk wait-reply keeps default scrollback configurable' {
     Assert ($talkieText.Contains('AGENT_TALK_SCROLLBACK_ROWS')) 'wait-reply scrollback should remain configurable'
 }
 
+Test-Case 'agent-talk wait-reply has a shorter stable idle window than new-session' {
+    $talkieText = Get-Content -Encoding UTF8 -Raw -LiteralPath (Join-Path $RepoRoot 'src\scripts\talkie.ps1')
+    Assert ($talkieText.Contains('function Get-WaitReplyStableIdleMilliseconds')) 'wait-reply should have its own stable idle helper'
+    Assert ($talkieText.Contains('AGENT_TALK_WAIT_REPLY_STABLE_IDLE_MS')) 'wait-reply stable idle window should have its own environment override'
+    Assert ($talkieText.Contains('$milliseconds = 1000')) 'wait-reply stable idle default should be short for response collection'
+    Assert ($talkieText.Contains('$stableIdleMilliseconds = Get-WaitReplyStableIdleMilliseconds')) 'wait-reply should use its own stable idle helper'
+}
+
 Test-Case 'agent-talk new-session creates unique ids' {
     $talkieText = Get-Content -Encoding UTF8 -Raw -LiteralPath (Join-Path $RepoRoot 'src\scripts\talkie.ps1')
     Assert ($talkieText.Contains('function New-SessionId')) 'talkie should create unique session ids'
@@ -149,9 +166,10 @@ Test-Case 'agent-talk new-session creates unique ids' {
     Assert ($talkieText.Contains('function Wait-NewSessionStatus')) 'new-session should wait with status reporting'
     Assert ($talkieText.Contains('Wait-NewSessionStatus -PipeName $pipe')) 'new-session should not lose pane id on non-ready states'
     Assert ($talkieText.Contains('"STATUS=$status"')) 'new-session should report ready/unknown/busy/error status'
-    Assert ($talkieText.Contains('function Get-StableIdleMilliseconds')) 'stable idle window should be centralized and configurable'
-    Assert ($talkieText.Contains('AGENT_TALK_STABLE_IDLE_MS')) 'stable idle window should allow environment override'
+    Assert ($talkieText.Contains('function Get-NewSessionStableIdleMilliseconds')) 'new-session should have its own stable idle helper'
+    Assert ($talkieText.Contains('AGENT_TALK_STABLE_IDLE_MS')) 'new-session stable idle window should allow environment override'
     Assert ($talkieText.Contains('$milliseconds = 3000')) 'stable idle default should be long enough for startup repaint jitter'
+    Assert ($talkieText.Contains('$stableIdleMilliseconds = Get-NewSessionStableIdleMilliseconds')) 'new-session should use its own stable idle helper'
     Assert ($talkieText.Contains("if (`$lastStatus -eq 'error')")) 'new-session should return error immediately without waiting for stability'
 }
 
@@ -166,7 +184,7 @@ Test-Case 'agent-talk codex reply uses last input and bullet anchor' {
         ($replyBullet + ' Hello.'),
         '',
         ($promptChar + ' '),
-        ('gpt-5.4-mini medium ' + $middleDot + ' D:\work\practice')
+        ('gpt-5.4-mini medium ' + $middleDot + ' C:\workspace\practice')
     )
 
     $text = Invoke-AgentTalkFixtureWaitReply -App 'codex' -Lines $lines -AgentVersion '0.136.0' -LastInputText 'hello'

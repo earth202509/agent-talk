@@ -523,10 +523,18 @@ function Get-ReplyScrollbackRows {
     return $scrollbackRows
 }
 
-function Get-StableIdleMilliseconds {
+function Get-NewSessionStableIdleMilliseconds {
     $milliseconds = 3000
     if ($env:AGENT_TALK_STABLE_IDLE_MS) {
         $milliseconds = [Math]::Max(100, [int]$env:AGENT_TALK_STABLE_IDLE_MS)
+    }
+    return $milliseconds
+}
+
+function Get-WaitReplyStableIdleMilliseconds {
+    $milliseconds = 1000
+    if ($env:AGENT_TALK_WAIT_REPLY_STABLE_IDLE_MS) {
+        $milliseconds = [Math]::Max(100, [int]$env:AGENT_TALK_WAIT_REPLY_STABLE_IDLE_MS)
     }
     return $milliseconds
 }
@@ -912,7 +920,7 @@ function Wait-StableIdleText {
     )
     $stableSince = $null
     $lastText = ''
-    $stableIdleMilliseconds = Get-StableIdleMilliseconds
+    $stableIdleMilliseconds = Get-WaitReplyStableIdleMilliseconds
     $deadline = (Get-Date).AddSeconds($MaxSeconds)
     while ((Get-Date) -lt $deadline) {
         $text = Read-SessionText $PipeName
@@ -940,7 +948,7 @@ function Wait-NewSessionStatus {
     $stableSince = $null
     $lastText = ''
     $lastStatus = 'unknown'
-    $stableIdleMilliseconds = Get-StableIdleMilliseconds
+    $stableIdleMilliseconds = Get-NewSessionStableIdleMilliseconds
     $deadline = (Get-Date).AddSeconds($MaxSeconds)
     while ((Get-Date) -lt $deadline) {
         $text = Read-SessionText $PipeName

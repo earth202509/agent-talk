@@ -1,9 +1,9 @@
 param(
     [string[]]$Skill,
     [string]$SourceRoot      = (Join-Path $PSScriptRoot '..\src'),
-    [string]$CodexRoot       = 'C:\Users\Gu Tianyang\.codex\skills',
+    [string]$CodexRoot       = (Join-Path $env:USERPROFILE '.codex\skills'),
     [string]$ClaudeRoot      = (Join-Path $env:USERPROFILE '.claude\skills'),
-    [string]$GeminiRoot      = 'C:\Users\Gu Tianyang\.gemini\config\plugins\my-skills\skills',
+    [string]$GeminiRoot      = (Join-Path $env:USERPROFILE '.gemini\config\plugins\my-skills\skills'),
     [string]$PiRoot          = (Join-Path $env:USERPROFILE '.pi\agent\skills'),
     [string]$MarketplaceRoot = (Join-Path $env:USERPROFILE '.claude\plugins\marketplaces'),
     [switch]$IgnoreMarketplaceConflicts,

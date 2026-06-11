@@ -14,7 +14,7 @@ This repository is the source of truth for the standalone `agent-talk` skill.
   .\scripts\deploy-skills.ps1
   ```
 - Skip a target with `-SkipCodex`, `-SkipClaude`, `-SkipGemini`, or `-SkipPi`.
-- Do not edit `C:\Users\Gu Tianyang\.codex\skills` directly except for emergency runtime
+- Do not edit installed skill directories directly except for emergency runtime
   debugging; port durable changes back into this repository.
 
 ## Skill Rules
