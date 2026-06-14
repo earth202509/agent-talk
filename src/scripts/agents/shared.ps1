@@ -676,16 +676,29 @@ function Resolve-AgentTalkAdapter {
     )
 
     $candidates = @()
+    $loadErrors = @()
     foreach ($script in Get-ChildItem -LiteralPath $AdapterDir -Filter '*.ps1') {
         if ($script.BaseName -eq 'shared') { continue }
-        $adapter = & $script.FullName -ExtraArgs $ExtraArgs
+        try {
+            $adapter = & $script.FullName -ExtraArgs $ExtraArgs
+        } catch {
+            $loadErrors += "$($script.Name): $($_.Exception.Message)"
+            continue
+        }
         if (-not (Test-AgentTalkAdapterName $adapter $Name)) { continue }
         $candidates += [pscustomobject]@{
             Path = $script.FullName
             Adapter = $adapter
         }
     }
-    if ($candidates.Count -eq 0) { throw "adapter '$Name' not found" }
+    if ($candidates.Count -eq 0) {
+        $suffix = if ($loadErrors.Count -gt 0) {
+            ' Adapter load errors: ' + ($loadErrors -join '; ')
+        } else {
+            ''
+        }
+        throw "adapter '$Name' not found.$suffix"
+    }
 
     $versionCache = @{}
     $resolved = @()

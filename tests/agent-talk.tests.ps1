@@ -92,6 +92,30 @@ Test-Case 'agent-talk exposes local agent discovery' {
     Assert ($talkieText.Contains("throw 'list-agents only supports json output'")) 'list-agents should not expose extra output formats'
 }
 
+Test-Case 'agent-talk ignores unrelated adapter load failures during resolution' {
+    . (Join-Path $RepoRoot 'src\scripts\agents\shared.ps1')
+    $adapterDir = Join-Path ([System.IO.Path]::GetTempPath()) ('agent-talk-adapters-' + [guid]::NewGuid())
+    try {
+        New-Item -ItemType Directory -Force -Path $adapterDir | Out-Null
+        Set-Content -Encoding UTF8 -LiteralPath (Join-Path $adapterDir 'broken.ps1') -Value "throw 'unavailable command'"
+        Set-Content -Encoding UTF8 -LiteralPath (Join-Path $adapterDir 'pi.ps1') -Value @'
+param([string]$ExtraArgs)
+@{
+    App = 'pi'
+    Aliases = @()
+    AdapterVersion = '1.0.0'
+}
+'@
+
+        $selection = Resolve-AgentTalkAdapter -AdapterDir $adapterDir -Name 'pi' -AgentVersion '1.0.0'
+        Assert ($selection.Adapter.App -eq 'pi') 'resolver should select pi when an unrelated adapter fails to load'
+    } finally {
+        if (Test-Path -LiteralPath $adapterDir) {
+            Remove-Item -LiteralPath $adapterDir -Recurse -Force
+        }
+    }
+}
+
 Test-Case 'agent-talk wait-reply extracts Claude replies with bullet variants' {
     $dash = [string]([char]0x2500) * 80
     $bulletChar = [char]0x25CF
